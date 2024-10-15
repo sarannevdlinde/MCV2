@@ -47,16 +47,8 @@ def composite_gradients(u1: np.array, u2: np.array, mask: np.array):
     grad_u1 = im_fwd_gradient(u1)  # Get gradients of u1
     grad_u2 = im_fwd_gradient(u2)  # Get gradients of u2
 
-    # Ensure the mask is single channel (binary)
-    mask_single_channel = mask[:, :, 0]  # Take the first channel
-
-    # Initialize gradient vectors
-    vi = np.zeros_like(grad_u1[0])  # Vertical component
-    vj = np.zeros_like(grad_u2[1])  # Horizontal component
-
-    # Compute composite gradient for pixels where the mask = 1
-    vi = np.where(mask_single_channel == 1, grad_u1[0], grad_u2[0])  # Vertical direction
-    vj = np.where(mask_single_channel == 1, grad_u1[1], grad_u2[1])  # Horizontal direction
+    vi = np.where(mask == 1, grad_u1[0], grad_u2[0])
+    vj = np.where(mask == 1, grad_u1[1], grad_u2[1])
 
     return vi, vj
 
@@ -66,28 +58,8 @@ def poisson_linear_operator(u: np.array, beta: np.array):
     Implements the action of the matrix A in the quadratic energy associated
     to the Poisson editing problem.
     """
-    Au = np.zeros_like(u)
-
-    rows, cols = u.shape
-
-    # Iterate through each pixel in the image and compute the laplacian
-    for i in range(rows):
-        for j in range(cols):
-            laplacian = 0
-
-            laplacian -= 4 * u[i, j]  # Current pixel
-
-            # Check neighboring pixels
-            if i > 0:
-                laplacian += u[i - 1, j]  # Top
-            if i < rows - 1:
-                laplacian += u[i + 1, j]  # Bottom
-            if j > 0:
-                laplacian += u[i, j - 1]  # Left
-            if j < cols - 1:
-                laplacian += u[i, j + 1]  # Right
-
-            Au[i, j] = laplacian + beta[i, j]
+    grad = im_fwd_gradient(u)
+    Au = beta - im_bwd_divergence(grad[0], grad[1])
 
     return Au
 
