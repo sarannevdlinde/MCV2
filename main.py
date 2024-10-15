@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-import scipy.optimize
+from scipy.optimize import minimize
 
 import poisson_editing
 
@@ -51,6 +51,10 @@ t_mouth = poisson_editing.get_translation(src_mask_mouth, dst_mask_mouth, "mouth
 mask = np.zeros_like(dst)
 u_comb = np.zeros_like(dst)  # combined image
 
+def E(u):
+    u = np.array(u) 
+    return 0.5 * np.dot(u.T, np.dot(A, u)) - np.dot(b, u) + c
+
 for channel in range(3):
     m = mask[:, :, channel]
     u = u_comb[:, :, channel]
@@ -61,10 +65,18 @@ for channel in range(3):
     beta = beta_0 * (1 - mask)
 
     vi, vj = poisson_editing.composite_gradients(u1, u2, mask)
+    A = poisson_editing.poisson_linear_operator(u, beta)
     b = (beta * u2) - poisson_editing.im_bwd_divergence(vi, vj)
     v = np.array([vi, vj])
     c = 0.5 * (np.inner(v, v)) + 0.5 * (np.inner((beta * u2), u2))
 
+    initial_u = np.zeros(A.shape[1])
+
+    result = minimize(E, initial_u)
+
+    optimal_u = result.x
+    print("u that minimizes E(u): ", optimal_u)
+    print("min value for E(u): ", result.fun)
     u_final =
 
 cv2.imshow('Final result of Poisson blending', u_final)
