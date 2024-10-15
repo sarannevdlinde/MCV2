@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import scipy.optimize
+
 import poisson_editing
 
 # Load images
@@ -15,20 +17,26 @@ dst = cv2.imread('images/lena/lena.png')
 ni, nj, nChannels = dst.shape
 
 # Display the images
-cv2.imshow('Source image', src); cv2.waitKey(0)
-cv2.imshow('Destination image', dst); cv2.waitKey(0)
+cv2.imshow('Source image', src);
+cv2.waitKey(0)
+cv2.imshow('Destination image', dst);
+cv2.waitKey(0)
 
 # Load masks for eye swapping
 src_mask_eyes = cv2.imread('images/lena/mask_src_eyes.png', cv2.IMREAD_COLOR)
 dst_mask_eyes = cv2.imread('images/lena/mask_dst_eyes.png', cv2.IMREAD_COLOR)
-cv2.imshow('Eyes source mask', src_mask_eyes); cv2.waitKey(0)
-cv2.imshow('Eyes destination mask', dst_mask_eyes); cv2.waitKey(0)
+cv2.imshow('Eyes source mask', src_mask_eyes);
+cv2.waitKey(0)
+cv2.imshow('Eyes destination mask', dst_mask_eyes);
+cv2.waitKey(0)
 
 # Load masks for mouth swapping
 src_mask_mouth = cv2.imread('images/lena/mask_src_mouth.png', cv2.IMREAD_COLOR)
 dst_mask_mouth = cv2.imread('images/lena/mask_dst_mouth.png', cv2.IMREAD_COLOR)
-cv2.imshow('Mouth source mask', src_mask_mouth); cv2.waitKey(0)
-cv2.imshow('Mouth destination mask', dst_mask_mouth); cv2.waitKey(0)
+cv2.imshow('Mouth source mask', src_mask_mouth);
+cv2.waitKey(0)
+cv2.imshow('Mouth destination mask', dst_mask_mouth);
+cv2.waitKey(0)
 
 # Get the translation vectors (hard coded)
 t_eyes = poisson_editing.get_translation(src_mask_eyes, dst_mask_eyes, "eyes")
@@ -39,26 +47,24 @@ t_mouth = poisson_editing.get_translation(src_mask_mouth, dst_mask_mouth, "mouth
 
 # Blend with the original (destination) image
 # CODE TO COMPLETE
+
 mask = np.zeros_like(dst)
-u_comb = np.zeros_like(dst) # combined image
+u_comb = np.zeros_like(dst)  # combined image
 
 for channel in range(3):
-
     m = mask[:, :, channel]
     u = u_comb[:, :, channel]
-    f = dst[:, :, channel]
+    u2 = dst[:, :, channel]
     u1 = src[:, :, channel]
 
-    beta_0 = 1   # TRY CHANGING
+    beta_0 = 1  # TRY CHANGING
     beta = beta_0 * (1 - mask)
 
-    vi, vj = poisson_editing.composite_gradients(u1, f, mask)
-    b = 0 # CODE TO COMPLETE
+    vi, vj = poisson_editing.composite_gradients(u1, u2, mask)
+    b = (beta * u2) - poisson_editing.im_bwd_divergence(vi, vj)
+    v = np.array([vi, vj])
+    c = 0.5 * (np.inner(v, v)) + 0.5 * (np.inner((beta * u2), u2))
 
-    # Solve the linear system A * u_final = b
-    u_final = spsolve(A, b.flatten()).reshape((height, width))
-
-    # Store the result in the combined image
-    u_comb[:, :, channel] = u_final
+    u_final =
 
 cv2.imshow('Final result of Poisson blending', u_final)
