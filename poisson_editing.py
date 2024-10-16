@@ -10,9 +10,7 @@ def im_fwd_gradient(image: np.ndarray):
     :return grad[0]: the gradient in the vertical direction.
     :return grad[1]: the gradient in the horizontal direction.
     """
-
     grad = np.gradient(image)
-
     return grad[0], grad[1]
 
 
@@ -21,7 +19,7 @@ def im_bwd_divergence(im1: np.ndarray, im2: np.ndarray):
     Compute the backward divergence in the horizontal and vertical direction.
 
     :return div_i + div_j: sum of horizontal and vertical components
-    """
+    """    
     div_i = np.zeros_like(im1)
     div_j = np.zeros_like(im2)
 
@@ -30,7 +28,10 @@ def im_bwd_divergence(im1: np.ndarray, im2: np.ndarray):
 
     div_j[:, 1:] = im2[:, 1:] - im2[:, :-1]
     div_j[:, 0] = im2[:, 0]
-    return div_i + div_j
+
+    divergence = (div_i + div_j).flatten()
+
+    return divergence
 
 
 def composite_gradients(u1: np.array, u2: np.array, mask: np.array):
@@ -59,7 +60,7 @@ def poisson_linear_operator(u: np.array, beta: np.array):
     to the Poisson editing problem.
     """
     grad = im_fwd_gradient(u)
-    Au = beta - im_bwd_divergence(grad[0], grad[1])
+    Au = np.dot(beta, u.flatten()) - im_bwd_divergence(grad[0], grad[1])
 
     return Au
 
