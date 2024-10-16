@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.signal import correlate2d
-from scipy.sparse import diags
+from scipy.sparse import lil_matrix
 
 def im_fwd_gradient(image: np.ndarray):
 
@@ -13,77 +13,88 @@ def im_fwd_gradient(image: np.ndarray):
 
     # Forward gradient in y-direction (vertical)
     grad_j[:-1, :] = image[1:, :] - image[:-1, :]
+    return grad_i, grad_j
 
-    # Stack gradients into a single array
-    return np.stack((grad_i, grad_j), axis=0)  # Shape (2, M, N)
+def im_bwd_divergence(vi: np.ndarray, vj: np.ndarray):
 
-def compute_composite_gradient(u1, u2, m):
+    # CODE TO COMPLETE
+
+    # Calculate divergence
+    div_i = np.zeros_like(vi, dtype=np.float32)
+    div_j = np.zeros_like(vj, dtype=np.float32)
+
+    # Divergence: ∂v_x/∂x + ∂v_y/∂y
+    div_i[:-1, :] = vi[1:, :] - vi[:-1, :]  # ∂v_x/∂y
+    div_j[:, :-1] = vj[:, 1:] - vj[:, :-1]  # ∂v_y/∂x
+
+    return div_i + div_j
+
+def composite_gradients(u1: np.array, u2: np.array, mask: np.array):
     """
-    Computes the composite gradient vector v using the binary mask m.
+    Creates a vector field v by combining the forward gradient of u1 and u2.
+    For pixels where the mask is 1, the composite gradient v must coincide
+    with the gradient of u1. When mask is 0, the composite gradient v must coincide
+    with the gradient of u2.
 
-    Parameters:
-    u1 (np.ndarray): First input image as a 2D array (shape: (M, N)).
-    u2 (np.ndarray): Second input image as a 2D array (shape: (M, N)).
-    m (np.ndarray): Binary mask as a 2D array (shape: (M, N)).
+    :return vi: composition of i components of gradients (vertical component)
+    :return vj: composition of j components of gradients (horizontal component)
+    """
+       
+    # Compute gradients of im1
+    grad1_x,grad1_y = im_fwd_gradient(u1)
 
+    # Compute gradients of im2
+    grad2_x,grad2_y = im_fwd_gradient(u2)
+    # CODE TO COMPLETE
+        # Initialize composite gradients
+    vi = np.zeros_like(grad1_x)
+    vj = np.zeros_like(grad1_y)
+
+    # Combine gradients based on the mask
+    vi[mask >= 1] = grad1_x[mask >= 1]
+    vj[mask >= 1] = grad1_y[mask >= 1]
+
+    vi[mask == 0] = grad2_x[mask == 0]
+    vj[mask == 0] = grad2_y[mask == 0]
+    
+    return vi, vj
+
+def poisson_linear_operator(u: np.array, beta: np.array) -> lil_matrix:
+    """
+    Implements the action of the matrix A in the quadratic energy associated
+    with the Poisson editing problem.
+    
+    Args:
+        u: Input image array (2D).
+        beta: Coefficient array (2D) to weight the Laplacian.
+    
     Returns:
-    np.ndarray: Composite gradient vector v of shape (2, M, N).
+        A: A sparse matrix representing the Poisson operator.
     """
-    # Compute forward gradients for both images
-    grad_u1 = im_fwd_gradient(u1)  # Shape (2, M, N)
-    grad_u2 = im_fwd_gradient(u2)  # Shape (2, M, N)
 
-    # Extract horizontal and vertical gradients
-    grad_i_u1, grad_j_u1 = grad_u1  # Shapes: (M, N), (M, N)
-    grad_i_u2, grad_j_u2 = grad_u2  # Shapes: (M, N), (M, N)
-
-    # Initialize the composite gradient vector
-    v_i = m * grad_i_u1 + (1 - m) * grad_i_u2  # Horizontal component (shape: (M, N))
-    v_j = m * grad_j_u1 + (1 - m) * grad_j_u2  # Vertical component (shape: (M, N))
-
-    # Stack the composite gradients into a single array
-    v = np.stack((v_i, v_j), axis=0)  # Shape (2, M, N)
-
-    return v
-
-def im_bwd_divergence(vi, vj):
-    M, N = vi.shape
-    div = np.zeros((M, N), dtype=np.float32)
-
-    # Use central differences for divergence calculation
-    div[:-1, :] += vi[1:, :] - vi[:-1, :]  # ∂v_x/∂y
-    div[:, :-1] += vj[:, 1:] - vj[:, :-1]  # ∂v_y/∂x
-
-    return div  # Keep original values for boundary
-
-def poisson_linear_operator(u, beta):
-    M, N = u.shape
-    MN = M * N
+    y_range, x_range = u.shape
+    n = y_range * x_range
     
-    # Create the diagonals for the Laplacian
-    diagonals = [-4 * np.ones(MN), 
-                 np.ones(MN - 1), 
-                 np.ones(MN - 1), 
-                 np.ones(MN - N), 
-                 np.ones(MN - N)]
+    # Create the sparse matrix A
+    A = lil_matrix((n, n))
     
-    # Adjust for boundaries without removing connections
-    # For horizontal boundaries (first and last rows)
-    for j in range(N):  # Iterate over columns
-        # For upper boundary (first row)
-        if j > 0:  # No left connection for the first row
-            diagonals[1][j] = 0  # No left connection
-        # For lower boundary (last row)
-        if j < N - 1:  # No right connection for the last row
-            diagonals[2][(M - 1) * N + j] = 0  # No right connection
+    for y in range(y_range):
+        for x in range(x_range):
+            index = x + y * x_range
+            
+            # If the mask value is non-zero (inside the region of interest)
+            if beta[y, x] > 0:
+                A[index, index] = -4  # Center pixel contribution
+                # Add contributions for neighbors (4-connectivity)
+                if x > 0: A[index, index - 1] = 1  # Left neighbor
+                if x < x_range - 1: A[index, index + 1] = 1  # Right neighbor
+                if y > 0: A[index, index - x_range] = 1  # Top neighbor
+                if y < y_range - 1: A[index, index + x_range] = 1  # Bottom neighbor
+            else:
+                A[index, index] = 1  # Set to identity for pixels outside the mask
 
-    # Create the sparse matrix
-    A = diags(diagonals, [0, -1, 1, -N, N], shape=(MN, MN), format='csr')
-    
-    # Add the beta coefficients
-    A += diags(beta.flatten(), 0)
+    return A.tocsc()  # Convert to CSR format for efficient operations
 
-    return A
 
 def get_translation(original_img: np.ndarray, translated_img: np.ndarray) -> tuple:
     """
