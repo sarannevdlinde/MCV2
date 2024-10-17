@@ -1,125 +1,69 @@
-import cv2
 import numpy as np
 from scipy.signal import correlate2d
-
+from scipy.sparse import lil_matrix
 
 def im_fwd_gradient(image: np.ndarray):
-    """
-    Compute the forward gradient in the horizontal and vertical direction.
 
-    :return grad[0]: the gradient in the vertical direction.
-    :return grad[1]: the gradient in the horizontal direction.
-    """
-
-    grad = np.gradient(image)
-
-    return grad[0], grad[1]
-
+    grad_i = np.roll(image, -1, axis=0) - image 
+    grad_j = np.roll(image, -1, axis=1) - image 
+    return grad_i, grad_j
 
 def im_bwd_divergence(im1: np.ndarray, im2: np.ndarray):
-    """
-    Compute the backward divergence in the horizontal and vertical direction.
 
-    :return div_i + div_j: sum of horizontal and vertical components
-    """
-    div_i = np.zeros_like(im1)
-    div_j = np.zeros_like(im2)
-
-    div_i[1:, :] = im1[1:, :] - im1[:-1, :]
-    div_i[0, :] = im1[0, :]
-
-    div_j[:, 1:] = im2[:, 1:] - im2[:, :-1]
-    div_j[:, 0] = im2[:, 0]
+    div_i = im1 - np.roll(im1, 1, axis=0)  
+    div_j = im2 - np.roll(im2, 1, axis=1)  
     return div_i + div_j
 
+def composite_gradients(u1: np.array, u2: np.array, m: np.array):
 
-def composite_gradients(u1: np.array, u2: np.array, mask: np.array):
-    """
-    Creates a vector field v by combining the forward gradient of u1 and u2.
-    For pixels where the mask is 1, the composite gradient v must coincide
-    with the gradient of u1. When mask is 0, the composite gradient v must coincide
-    with the gradient of u2.
+    grad_u1_i,grad_u1_j = im_fwd_gradient(u1)
+    grad_u2_i,grad_u2_j = im_fwd_gradient(u2)
 
-    :return vi: composition of i components of gradients (vertical component)
-    :return vj: composition of j components of gradients (horizontal component)
-    """
-
-    grad_u1 = im_fwd_gradient(u1)  # Get gradients of u1
-    grad_u2 = im_fwd_gradient(u2)  # Get gradients of u2
-
-    # Ensure the mask is single channel (binary)
-    mask_single_channel = mask[:, :, 0]  # Take the first channel
-
-    # Initialize gradient vectors
-    vi = np.zeros_like(grad_u1[0])  # Vertical component
-    vj = np.zeros_like(grad_u2[1])  # Horizontal component
-
-    # Compute composite gradient for pixels where the mask = 1
-    vi = np.where(mask_single_channel == 1, grad_u1[0], grad_u2[0])  # Vertical direction
-    vj = np.where(mask_single_channel == 1, grad_u1[1], grad_u2[1])  # Horizontal direction
-
-    return vi, vj
-
+    vi = m * grad_u1_i + (1 - m) * grad_u2_i
+    vj= m * grad_u1_j + (1 - m) * grad_u2_j
+    
+    return vi,vj
 
 def poisson_linear_operator(u: np.array, beta: np.array):
-    """
-    Implements the action of the matrix A in the quadratic energy associated
-    to the Poisson editing problem.
-    """
-    Au = np.zeros_like(u)
-
-    rows, cols = u.shape
-
-    # Iterate through each pixel in the image and compute the laplacian
-    for i in range(rows):
-        for j in range(cols):
-            laplacian = 0
-
-            laplacian -= 4 * u[i, j]  # Current pixel
-
-            # Check neighboring pixels
-            if i > 0:
-                laplacian += u[i - 1, j]  # Top
-            if i < rows - 1:
-                laplacian += u[i + 1, j]  # Bottom
-            if j > 0:
-                laplacian += u[i, j - 1]  # Left
-            if j < cols - 1:
-                laplacian += u[i, j + 1]  # Right
-
-            Au[i, j] = laplacian + beta[i, j]
-
+    
+    grad_u_i, grad_u_j = im_fwd_gradient(u)
+    div = im_bwd_divergence(grad_u_i, grad_u_j)
+    Au = (beta - div) * u
+    
     return Au
 
 
-def get_translation(original_img: np.ndarray, translated_img: np.ndarray, *part: str):
-    # For the eyes mask:
-    # The top left pixel of the source mask is located at (x=115, y=101)
-    # The top left pixel of the destination mask is located at (x=123, y=125)
-    # This gives a translation vector of (dx=8, dy=24)
+def get_translation(original_img: np.ndarray, translated_img: np.ndarray) -> tuple:
+    """
+    Calculate the translation offset of a mask between the original and translated images.
 
-    # For the mouth mask:
-    # The top left pixel of the source mask is located at (x=125, y=140)
-    # The top left pixel of the destination mask is located at (x=132, y=173)
-    # This gives a translation vector of (dx=7, dy=33)
-
-    # Convert 3-dimensional img to a 2-dimensional greyscale image
-    if original_img.ndim == 3:
-        original_img = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
-    if translated_img.ndim == 3:
-        translated_img = cv2.cvtColor(translated_img, cv2.COLOR_BGR2GRAY)
-
-    cross_correlation = correlate2d(original_img, translated_img, mode='full')
-
-    y_max, x_max = np.unravel_index(np.argmax(cross_correlation), cross_correlation.shape)
-    dy = y_max - (translated_img.shape[0] - 1)
-    dx = x_max - (translated_img[1] - 1)
-
-    return dy, dx
+    :param original_img: The original image/mask.
+    :param translated_img: The translated image/mask.
+    :param part: The part of the image ('eyes' or 'mouth').
+    :return: A tuple representing the (dy, dx) translation offset.
+    """
+    
+    # Calculate the cross-correlation
+    correlation = correlate2d(original_img, translated_img, mode='full')
+    
+    # Find the index of the maximum correlation
+    y, x = np.unravel_index(np.argmax(correlation), correlation.shape)
+    
+    # Determine the translation offset
+    dy = (original_img.shape[0] - 1) -y
+    dx = (original_img.shape[1] - 1) -x
+    
+    # Return the translation vector
+    return (int(dy), int(dx))
+'''
     # The following shifts are hard coded:
-    # if part[0] == "eyes":
-    #     return (24, 8)
-    # elif part[0] == "mouth":
-    #     return (33, 7)
-    # else:
-    #     return (0, 0)
+    if part[0] == "eyes":
+        return (24, 8)
+    elif part[0] == "mouth":
+        return (33, 7)
+    else:
+        return (0, 0)
+'''
+    # Here on could determine the shift vector programmatically,
+    # given an original image/mask and its translated version.
+    # Idea: using maximal cross-correlation (e.g., scipy.signal.correlate2d), or similar.
