@@ -1,0 +1,118 @@
+import numpy as np
+from scipy.sparse import linalg
+from scipy.sparse import lil_matrix
+
+# Constants to classify points
+OMEGA = 0
+DEL_OMEGA = 1
+OUTSIDE = 2
+
+
+# Determine if a given index is inside omega, on the boundary (del omega),
+# or outside the omega region
+def point_location(index: tuple[int, int], mask: np.ndarray) -> int:
+    if not in_omega(index, mask):
+        return OUTSIDE
+    if edge(index, mask):
+        return DEL_OMEGA
+    return OMEGA
+
+
+# Check if a point is inside omega (where the mask is 1)
+def in_omega(index: tuple[int, int], mask: np.ndarray) -> bool:
+    return mask[index] == 1
+
+
+# Check if a point is on the boundary of omega (del omega)
+def edge(index: tuple[int, int], mask: np.ndarray) -> bool:
+    if not in_omega(index, mask):
+        return False
+    # If a point inside omega has a neighboring point outside omega, it's on the edge
+    for pt in get_surrounding(index):
+        if not in_omega(pt, mask):
+            return True
+    return False
+
+
+# Apply the Laplacian operator at a given index
+def lapl_at_index(source: np.ndarray, index: tuple[int, int]) -> float:
+    i, j = index
+    val = (4 * source[i, j]) - source[i + 1, j] - source[i - 1, j] - source[i, j + 1] - source[i, j - 1]
+    return val
+
+
+# Find the indices of omega (where the mask is 1)
+def mask_indices(mask: np.ndarray) -> list[tuple[int, int]]:
+    nonzero = np.nonzero(mask)
+    return list(zip(nonzero[0], nonzero[1]))
+
+
+# Get surrounding indices (up, down, left, right)
+def get_surrounding(index: tuple[int, int]) -> list[tuple[int, int]]:
+    i, j = index
+    return [(i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)]
+
+
+# Create the sparse matrix A for Poisson editing
+def poisson_sparse_matrix(points: list[tuple[int, int]]) -> lil_matrix:
+    N = len(points)  # Number of points in omega
+    A = lil_matrix((N, N))  # Create a sparse matrix
+
+    for i, index in enumerate(points):
+        A[i, i] = 4  # Diagonal elements are 4
+        for x in get_surrounding(index):
+            if x in points:
+                j = points.index(x)
+                A[i, j] = -1  # Off-diagonal elements are -1 for neighboring points
+    return A
+
+
+# Main method for Poisson image editing on one channel given a source, target, and mask
+def process(source: np.ndarray, target: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    indices = mask_indices(mask)
+    N = len(indices)
+
+    # Create the sparse Poisson matrix A
+    A = poisson_sparse_matrix(indices)
+
+    # Create the B vector
+    b = np.zeros(N)
+    for i, index in enumerate(indices):
+        # Left-hand side of the equation: Laplacian of the source image
+        b[i] = lapl_at_index(source, index)
+
+        # If the point is on the boundary (del omega), add target intensity
+        if point_location(index, mask) == DEL_OMEGA:
+            for pt in get_surrounding(index):
+                if not in_omega(pt, mask):
+                    b[i] += target[pt]
+
+    # Solve for x (unknown intensities) using Conjugate Gradient method
+    x, _ = linalg.cg(A, b)
+
+    # Create a copy of the target image and place the solved intensities
+    composite = np.copy(target).astype(int)
+    for i, index in enumerate(indices):
+        composite[index] = x[i]
+    return composite
+
+
+# Naive blend: places the source region directly on the target for testing
+def preview(source: np.ndarray, target: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    return (target * (1.0 - mask)) + (source * mask)
+
+
+# Get translation vector between two images based on the mask positions
+def get_translation(original_img: np.ndarray, translated_img: np.ndarray, *part: str) -> tuple[int, int]:
+    # Hardcoded translation vectors (can be adjusted based on part)
+    if part[0] == "eyes":
+        return 8, 24
+    elif part[0] == "mouth":
+        return 33, 7
+    else:
+        return 0, 0
+    # if part[0] == "man":
+    #     return 112, 274  # Example for the "man" part
+    # # Add other parts if needed
+    # else:
+    #     return 0, 0
