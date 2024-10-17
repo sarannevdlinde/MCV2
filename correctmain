@@ -1,0 +1,81 @@
+import cv2
+import numpy as np
+import poisson_editing
+
+
+# Read images eagle
+# source_img = cv2.imread('input/1/source.png', cv2.IMREAD_COLOR)
+# target_img = cv2.imread('input/1/target.png', cv2.IMREAD_COLOR)
+# mask_img = cv2.imread('input/1/mask.png', cv2.IMREAD_GRAYSCALE)
+
+# Read images jet
+# source_img = cv2.imread('input/2/source.jpg', cv2.IMREAD_COLOR)
+# target_img = cv2.imread('input/2/target.jpg', cv2.IMREAD_COLOR)
+# mask_img = cv2.imread('input/2/mask.jpg', cv2.IMREAD_GRAYSCALE)
+
+# Read images lena
+source_img = cv2.imread('images/lena/girl.png', cv2.IMREAD_COLOR)
+target_img = cv2.imread('images/lena/lena.png', cv2.IMREAD_COLOR)
+source_mask = cv2.imread('images/lena/mask_src_eyes.png', cv2.IMREAD_GRAYSCALE)
+target_mask = cv2.imread('images/lena/mask_dst_eyes.png', cv2.IMREAD_GRAYSCALE)
+
+
+# Read images beach
+# source_img = cv2.imread('images/input/4/source.jpg', cv2.IMREAD_COLOR)
+# target_img = cv2.imread('images/input/4/target.jpg', cv2.IMREAD_COLOR)
+# mask_img = cv2.imread('images/input/4/mask.png', cv2.IMREAD_GRAYSCALE)
+
+# Read images monalisa
+# source_img = cv2.imread('images/monalisa/ginevra.png', cv2.IMREAD_COLOR)
+# source_mask = cv2.imread('images/monalisa/source_mask.png', cv2.IMREAD_GRAYSCALE)
+# target_img = cv2.imread('images/monalisa/lisa.png', cv2.IMREAD_COLOR)
+# target_mask = cv2.imread('images/monalisa/target_mask.png', cv2.IMREAD_GRAYSCALE)
+
+# # Read images airplane beach
+# source_img = cv2.imread('images/manbeach.jpeg', cv2.IMREAD_COLOR)
+# target_img = cv2.imread('images/beach.jpeg', cv2.IMREAD_COLOR)
+# source_mask = cv2.imread('images/mask_manbeach.jpeg', cv2.IMREAD_GRAYSCALE)
+# target_mask = cv2.imread('images/mask_beach.jpeg', cv2.IMREAD_GRAYSCALE)
+
+# Get the translation vectors (hard coded or computed)
+t_man = poisson_editing.get_translation(source_mask, target_mask, "eyes")
+
+# Translate both the source image and mask using the same translation matrix
+M_man = np.float32([[1, 0, t_man[0]], [0, 1, t_man[1]]])
+src_man_translated = cv2.warpAffine(source_img, M_man, (source_img.shape[1], source_img.shape[0]))
+src_mask_man_translated = cv2.warpAffine(source_mask, M_man, (source_mask.shape[1], source_mask.shape[0]))
+
+# Clean the areas corresponding in the destination image using the destination mask
+dst_cleaned_eyes = cv2.bitwise_and(target_img, target_img, mask=cv2.bitwise_not(src_mask_man_translated))
+
+# Combine the translated parts (the eyes) with the cleaned destination image
+src_eyes_cut_translated = cv2.bitwise_and(src_man_translated, src_man_translated, mask=src_mask_man_translated)
+# cv2.imwrite("mask_man_translated.png", src_mask_man_translated)
+
+if source_img is None or target_img is None or source_mask is None:
+    print("Failed to load one or more images.")
+
+# Normalize mask to range [0,1]
+mask = np.atleast_3d(src_mask_man_translated).astype(np.float32) / 255.0
+# Make mask binary
+mask[mask != 1] = 0
+# Trim to one channel
+mask = mask[:, :, 0]
+
+# Check if the source and target images have the same number of channels
+if source_img.shape[-1] != target_img.shape[-1]:
+    print("Source and target images must have the same number of channels.")
+
+channels = source_img.shape[-1]
+src_man_translated = src_man_translated.astype(np.float32)
+target_img = target_img.astype(np.float32)
+# Process each channel with the Poisson blending function
+result_stack = [poisson_editing.process(src_man_translated[:, :, i], target_img[:, :, i], mask) for i in range(channels)]
+# Merge the channels back into one image
+result = cv2.merge(result_stack)
+
+# Save the result image
+output_filepath = ('output/result.jpeg')
+
+cv2.imwrite(output_filepath, result)
+print(f"Result saved to {output_filepath}.")
